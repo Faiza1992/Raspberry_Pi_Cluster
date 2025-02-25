@@ -1,0 +1,69 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.utils.class_weight import compute_class_weight
+from imblearn.combine import SMOTEENN
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+import joblib
+
+# Load your dataset
+data = pd.read_csv('/content/drive/MyDrive/Dataset/shuffled_combined.csv')  # Update with your actual file path
+
+# Preprocess the data
+X = data[['Input Frequency', 'Buffer Size Bolt1 (KB)', 'Buffer Size Bolt2 (KB)',
+          'Latency (ms)', 'Processing Delay (ms)', 'Dropped Packets']]  # Adjust these feature names as per your dataset
+y = data['Bolt']  # The target variable
+
+# Encode categorical features in target variable
+y = y.map({'Bolt1': 0, 'Bolt2': 1})  # Update based on your actual class labels
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.4, random_state=10)
+
+# Apply SMOTE to oversample Bolt1 (minority)
+smote = SMOTE(sampling_strategy='auto', random_state=10)  # Auto will balance classes by oversampling the minority class
+X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+
+# Apply RandomUnderSampler to undersample Bolt2 (majority)
+under = RandomUnderSampler(sampling_strategy=1, random_state=10)  # Undersample to reduce Bolt2 to 75% of total
+X_resampled, y_resampled = under.fit_resample(X_resampled, y_resampled)
+
+# Create and fit the Decision Tree model
+model = DecisionTreeClassifier(random_state=10)
+model.fit(X_resampled, y_resampled)
+
+# Make probability predictions
+y_prob = model.predict_proba(X_test)
+
+# Adjust the threshold
+threshold = 0.5
+y_pred_thresholded = (y_prob[:, 1] >= threshold).astype(int)
+
+# Evaluate the model with the new threshold
+accuracy = accuracy_score(y_test, y_pred_thresholded)
+print(f'Accuracy with threshold {threshold}: {accuracy:.2f}')
+
+# Classification report
+report = classification_report(y_test, y_pred_thresholded, target_names=['Bolt1', 'Bolt2'])
+print('Classification Report:\n', report)
+
+# Confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred_thresholded)
+print('Confusion Matrix:\n', conf_matrix)
+
+# Save the model
+joblib.dump(model, 'aggregation_node_model_resampled.pkl')
+print("Model saved as 'aggregation_node_model_resampled.pkl'.")
+
+# Predict aggregation node example with the new threshold
+sample_input = pd.DataFrame([[0.002, 128, 128, 1000, 3, 216]],
+                            columns=['Input Frequency', 'Buffer Size Bolt1 (KB)', 'Buffer Size Bolt2 (KB)',
+                                     'Latency (ms)', 'Processing Delay (ms)', 'Dropped Packets'])
+sample_prob = model.predict_proba(sample_input)[0][1]
+predicted_aggregation_node = "Bolt2" if sample_prob >= threshold else "Bolt1"
+print(f'Predicted Aggregation Node: {predicted_aggregation_node}')
+# Print the depth of the trained decision tree model
+print(f'Depth of the Decision Tree: {model.get_depth()}')
